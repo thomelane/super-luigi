@@ -1,0 +1,14 @@
+[project]
+name = "super_luigi"
+version = "0.1.0"
+description = "A enhanced version of Luigi"
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

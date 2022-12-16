@@ -1,0 +1,4 @@
+--requirement requirements.txt
+pylint
+black
+pytest
