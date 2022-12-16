@@ -1,0 +1,3 @@
+luigi
+# for S3ObjectTarget and S3PrefixTarget
+boto3

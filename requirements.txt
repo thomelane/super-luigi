@@ -4,3 +4,38 @@
 #
 #    pip-compile --resolver=backtracking requirements.in
 #
+boto3==1.26.31
+    # via -r requirements.in
+botocore==1.29.31
+    # via
+    #   boto3
+    #   s3transfer
+docutils==0.19
+    # via python-daemon
+jmespath==1.0.1
+    # via
+    #   boto3
+    #   botocore
+lockfile==0.12.2
+    # via python-daemon
+luigi==3.1.1
+    # via -r requirements.in
+python-daemon==2.3.2
+    # via luigi
+python-dateutil==2.8.2
+    # via
+    #   botocore
+    #   luigi
+s3transfer==0.6.0
+    # via boto3
+six==1.16.0
+    # via python-dateutil
+tenacity==8.1.0
+    # via luigi
+tornado==6.2
+    # via luigi
+urllib3==1.26.13
+    # via botocore
+
+# The following packages are considered to be unsafe in a requirements file:
+# setuptools

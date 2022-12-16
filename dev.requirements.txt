@@ -10,18 +10,40 @@ attrs==22.1.0
     # via pytest
 black==22.12.0
     # via -r dev.requirements.in
+boto3==1.26.31
+    # via -r requirements.txt
+botocore==1.29.31
+    # via
+    #   -r requirements.txt
+    #   boto3
+    #   s3transfer
 click==8.1.3
     # via black
 dill==0.3.6
     # via pylint
+docutils==0.19
+    # via
+    #   -r requirements.txt
+    #   python-daemon
 exceptiongroup==1.0.4
     # via pytest
 iniconfig==1.1.1
     # via pytest
 isort==5.11.2
     # via pylint
+jmespath==1.0.1
+    # via
+    #   -r requirements.txt
+    #   boto3
+    #   botocore
 lazy-object-proxy==1.8.0
     # via astroid
+lockfile==0.12.2
+    # via
+    #   -r requirements.txt
+    #   python-daemon
+luigi==3.1.1
+    # via -r requirements.txt
 mccabe==0.7.0
     # via pylint
 mypy-extensions==0.4.3
@@ -40,6 +62,27 @@ pylint==2.15.8
     # via -r dev.requirements.in
 pytest==7.2.0
     # via -r dev.requirements.in
+python-daemon==2.3.2
+    # via
+    #   -r requirements.txt
+    #   luigi
+python-dateutil==2.8.2
+    # via
+    #   -r requirements.txt
+    #   botocore
+    #   luigi
+s3transfer==0.6.0
+    # via
+    #   -r requirements.txt
+    #   boto3
+six==1.16.0
+    # via
+    #   -r requirements.txt
+    #   python-dateutil
+tenacity==8.1.0
+    # via
+    #   -r requirements.txt
+    #   luigi
 tomli==2.0.1
     # via
     #   black
@@ -47,5 +90,16 @@ tomli==2.0.1
     #   pytest
 tomlkit==0.11.6
     # via pylint
+tornado==6.2
+    # via
+    #   -r requirements.txt
+    #   luigi
+urllib3==1.26.13
+    # via
+    #   -r requirements.txt
+    #   botocore
 wrapt==1.14.1
     # via astroid
+
+# The following packages are considered to be unsafe in a requirements file:
+# setuptools
