@@ -4,7 +4,6 @@ from argparse import ArgumentParser
 from importlib import import_module
 import luigi
 from typing import Union, Optional, Type, Dict
-import os
 
 from superluigi.tasks.base import BaseTask, ExternalTask, apply_to_target
 from superluigi.config import SUPERLUIGI_DEFAULT_TASK_CONFIG

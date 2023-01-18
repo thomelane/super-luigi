@@ -9,7 +9,6 @@ import botocore
 import shutil
 import json
 from typing import Optional, Union
-import os
 
 from superluigi.config import SUPERLUIGI_LOCAL_DATA_DIR
 
