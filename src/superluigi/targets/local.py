@@ -58,7 +58,7 @@ class LocalFileTarget(Target):
     @contextmanager
     def tmp_read_path(self, **kwargs):
         assert not self.path.is_dir(), f'{self.path} already exists as a folder.'
-        with tempfile.NamedTemporaryFile() as tmp_file:
+        with tempfile.NamedTemporaryFile(suffix=self.path.suffix) as tmp_file:
             tmp_path = tmp_file.name
             shutil.copyfile(self.path, tmp_path)
             yield tmp_path
@@ -66,7 +66,7 @@ class LocalFileTarget(Target):
     @contextmanager
     def tmp_write_path(self, **kwargs):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir, 'tmpfile')
+            tmp_path = Path(tmp_dir, f'tmpfile{self.path.suffix}')
             yield tmp_path
             assert tmp_path.exists(), f'{tmp_path} (for {self.path}) does not exist.'
             assert tmp_path.is_file(), f'{tmp_path} (for {self.path}) is not a file.'
