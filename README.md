@@ -113,3 +113,66 @@ run_task(task, raise_exception=True)
 ```
 
 See tutorial at `tutorial/superluigi_tutorial.py` for more details.
+
+### Starting a task from the command line
+
+```bash
+python src/superluigi/task_runner.py \
+    --task yourpackage.YourTask \
+    --config-file yourpackage/dev.cfg
+```
+
+With the command line interface the task parameters should be provided in the config file.
+
+### Starting a task from code
+
+```python
+from tcir_models.utils.tuigi.tutorial.tutorial_utils import FeaturesTask
+from tcir_models.utils.tuigi.task_runner import run_task
+
+if __name__ == "__main__":
+    task = FeaturesTask(date=datetime.date.today(), version=42)
+    path = run_task(task)
+```
+
+You can also provide a config file when running from code: `run_task(task, config_file=path)`.
+
+### Central Scheduler
+
+A local task scheduler will be used by default, but you can also start a centralized server for tracking and dependency graph visualization. You can start the server in the background using:
+
+```bash
+screen -S luigi_ui
+mkdir -p ./tmp/luigi
+luigid --pidfile ./tmp/luigi/pid --logdir ./tmp/luigi/logs/ --state-path ./tmp/luigi/state --port 8082
+# Control + A then Control + D to detach from screen
+```
+
+You should then be able to access the server at `http://localhost:8082`.
+
+And finally add the `--central-scheduler` flag to the `task_runner.py` command when starting tasks, or by setting `central_scheduler=True` when running a task from code using `run_task`.
+
+You can stop the server using:
+
+```bash
+screen -list  # to find id
+screen -r <id>.luigi_ui
+# Control + C to stop server
+```
+
+## Troubleshooting
+
+### Can't access Central Scheduler
+
+* Make sure you have forwarded the port if running on a remote server.
+
+### `No module named '_sqlite3'`
+
+* Install SQLite: `sudo yum install sqlite-devel`
+* Get Python version: `python -c "import sys; print(sys.version_info)"`
+* Re-install `pyenv install <py-version>` (e.g. 3.7.10)
+
+### luigi.parameter.MissingParameterException
+
+* Can occur when instanciating a task before the config has been loaded (assuming you have the parameters defined there).
+* You can pass a task **class** to the `run_task` methods, and then define the parameters for that task in config too.
