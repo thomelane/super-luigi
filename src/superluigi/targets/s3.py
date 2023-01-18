@@ -1,3 +1,4 @@
+import math
 import luigi
 import boto3
 from contextlib import contextmanager
@@ -105,6 +106,9 @@ def head_s3_object(s3_client, bucket, object_key) -> Dict[str, Any]:
 def get_bucket_location(s3_client, bucket) -> str:
     response = s3_client.get_bucket_location(Bucket=bucket)
     region = response['LocationConstraint']
+    if region is None:
+        # https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html#API_GetBucketLocation_ResponseSyntax
+        region = 'us-east-1'
     return region
 
 
@@ -183,8 +187,10 @@ class S3ObjectTarget(luigi.Target):
         except self._s3_client.exceptions.NoSuchKey:
             return None
 
-    def download(self) -> Path:
-        return self.download_object()
+    def download(self, force_local_download=False) -> Path:
+        if force_local_download or not self.local_same_as_remote():
+            self.download_object()
+        return self._local_object_path
 
     def download_object(self) -> Path:
         self._local_object_path.parent.mkdir(exist_ok=True, parents=True)
@@ -193,6 +199,7 @@ class S3ObjectTarget(luigi.Target):
             self.object_key,
             str(self._local_object_path)
         )
+        assert self._local_object_path.exists(), f"{self._local_object_path} doesn't exist."
         return self._local_object_path
 
     def upload_object(self) -> None:
@@ -246,6 +253,7 @@ class S3PrefixTarget(luigi.Target):
         metadata_bucket: Optional[str] = None,
         metadata_object_key: Optional[str] = None,
         metadata_inside_prefix: bool = False,
+        metadata_contents_limit: Optional[int] = 10,
         local_root: Union[Path, str] = os.getenv('SUPERLUIGI_LOCAL_DATA_DIR', '~/.superluigi/data'),
         **kwargs
     ) -> None:
@@ -255,6 +263,7 @@ class S3PrefixTarget(luigi.Target):
             self.default_metadata_bucket()
         self.metadata_object_key = metadata_object_key or \
             self.default_metadata_object_key(metadata_inside_prefix)
+        self.metadata_contents_limit = metadata_contents_limit
         self.local_root = local_root
         self._local_bucket_path = Path(self.local_root, self.bucket)
         self._local_prefix_path = Path(self.local_root, self.bucket, self.prefix)
@@ -303,26 +312,28 @@ class S3PrefixTarget(luigi.Target):
             str: object key of the metadata file
         """
         if not metadata_inside_prefix:
-            return str(self.prefix) + '.metadata.json'
+            return str(Path(self.prefix)) + '.metadata.json'
         else:
             return str(Path(self.prefix, 'metadata.json'))
 
     def write_metadata(self, metadata: dict):
-        contents = []
+        output: Dict[str, Any] = {
+            'type': self.__class__.__name__,
+            'path': self.path
+        }
         objects = [o for o in self.list_remote_objects()]
         assert len(objects) > 0, f"Couldn't find any objects at {self.path}."
-        for object in objects:
-            content = {
-                'key': str(Path(object['key']).relative_to(self.prefix)),
-                'size': object['size'],
-                'etag': object['etag']
-            }
-            contents.append(content)
-        metadata['output'] = {
-            'type': self.__class__.__name__,
-            'path': self.path,
-            'contents': contents
-        }
+        if (self.metadata_contents_limit == None) or (len(objects) < self.metadata_contents_limit):
+            contents = []
+            for object in objects:
+                content = {
+                    'key': str(Path(object['key']).relative_to(self.prefix)),
+                    'size': object['size'],
+                    'etag': object['etag']
+                }
+                contents.append(content)
+            output['contents'] = contents
+        metadata['output'] = output
         return put_metadata_s3_object(
             s3_client=self._s3_client,
             bucket=self.metadata_bucket,
@@ -351,7 +362,7 @@ class S3PrefixTarget(luigi.Target):
         # if any object's size doesn't match, return False
         for key in local_object_by_key.keys():
             local_object_size = local_object_by_key[key]['size']
-            remote_object_size = local_object_by_key[key]['size']
+            remote_object_size = remote_objects_by_key[key]['size']
             if local_object_size != remote_object_size:
                 return False
         # otherise return True
@@ -378,8 +389,10 @@ class S3PrefixTarget(luigi.Target):
                             'etag': object['ETag']
                         }
 
-    def download(self) -> Path:
-        return self.download_prefix()
+    def download(self, force_local_download=False) -> Path:
+        if force_local_download or not self.local_same_as_remote():
+            self.download_prefix()
+        return self._local_prefix_path
 
     def download_prefix(self) -> Path:
         if self._local_prefix_path.exists() and self._local_prefix_path.is_dir():
@@ -392,14 +405,27 @@ class S3PrefixTarget(luigi.Target):
                 object['key'],
                 str(local_filepath)
             )
+            assert local_filepath.exists(), f"{local_filepath} doesn't exist."
         return self._local_prefix_path
 
     def upload_prefix(self) -> None:
+        self.delete_remote_prefix()
         for object in self.list_local_objects():
             self._s3_client.upload_file(
                 str(Path(self._local_bucket_path, object['key'])),
                 self.bucket,
                 object['key']
+            )
+        
+    def delete_remote_prefix(self) -> None:
+        objects = [{'Key': obj['key']} for obj in self.list_remote_objects()]
+        # boto3 delete_objects request can handle max of 1000 objects, so must batch.
+        num_batches = math.ceil(len(objects) / 1000)
+        for batch_idx in range(num_batches):
+            objects_batch = objects[batch_idx * 1000: (batch_idx + 1) * 1000]
+            self._s3_client.delete_objects(
+                Bucket=self.bucket,
+                Delete={'Objects': objects_batch}
             )
 
     def put_object(self, object: str, object_key: str):
