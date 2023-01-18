@@ -7,6 +7,7 @@ from typing import Union, Optional, Type, Dict
 import os
 
 from superluigi.tasks.base import BaseTask, ExternalTask, apply_to_target
+from superluigi.config import SUPERLUIGI_DEFAULT_TASK_CONFIG
 
 
 current_dir = Path(__file__).parent
@@ -83,7 +84,7 @@ def set_config_file(config_file: Optional[Path] = None):
         luigi.configuration.add_config_path(config_file)
         print(f'Using config at {config_file}')
     else:
-        default_config_file = os.getenv('SUPERLUIGI_LOCAL_DATA_DIR', '~/.superluigi/data')
+        default_config_file = SUPERLUIGI_DEFAULT_TASK_CONFIG
         if Path(default_config_file).exists():
             luigi.configuration.add_config_path(default_config_file)
             print(f'Using config at {default_config_file}')

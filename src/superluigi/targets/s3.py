@@ -11,6 +11,8 @@ import json
 from typing import Optional, Union
 import os
 
+from superluigi.config import SUPERLUIGI_LOCAL_DATA_DIR
+
 
 def get_creds(role_arn):
     sts = boto3.client('sts')
@@ -119,7 +121,7 @@ class S3ObjectTarget(luigi.Target):
         object_key: str,
         metadata_bucket: Optional[str] = None,
         metadata_object_key: Optional[str] = None,
-        local_root: Union[Path, str] = os.getenv('SUPERLUIGI_LOCAL_DATA_DIR', '~/.superluigi/data'),
+        local_root: Union[Path, str] = SUPERLUIGI_LOCAL_DATA_DIR,
         **kwargs
     ) -> None:
         self.bucket = bucket
@@ -254,7 +256,7 @@ class S3PrefixTarget(luigi.Target):
         metadata_object_key: Optional[str] = None,
         metadata_inside_prefix: bool = False,
         metadata_contents_limit: Optional[int] = 10,
-        local_root: Union[Path, str] = os.getenv('SUPERLUIGI_LOCAL_DATA_DIR', '~/.superluigi/data'),
+        local_root: Union[Path, str] = SUPERLUIGI_LOCAL_DATA_DIR,
         **kwargs
     ) -> None:
         self.bucket = bucket
