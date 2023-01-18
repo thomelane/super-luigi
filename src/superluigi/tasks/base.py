@@ -7,6 +7,8 @@ from contextlib import contextmanager, ExitStack
 import datetime
 import hashlib
 
+from superluigi.visuals import plot_dependency_graph
+
 
 def build(tasks: Union[luigi.Task, List[luigi.Task]], central_scheduler=False):
     if not isinstance(tasks, list):
@@ -34,6 +36,7 @@ def apply_to_target(
 class BaseTask(luigi.Task):
     raise_exception = luigi.BoolParameter(significant=False, default=False)
     force = luigi.BoolParameter(significant=False, default=False)
+    hash_seed = luigi.IntParameter(significant=False, default=42)
 
     def __init_subclass__(cls):
         super().__init_subclass__()
@@ -86,22 +89,29 @@ class BaseTask(luigi.Task):
     def task_hash(self):
         """
         A hash of concat of `task_id`s from required tasks and current task.
+        Cached value stored in self._task_hash
         """
-        requirements = self.requires()
-        # requirements could output dict
-        if isinstance(requirements, dict):
-            # sort tasks by key
-            requirements = [i[1] for i in sorted(requirements.items(), key=lambda e: e[0])]
-        # requirements could output a task
-        if isinstance(requirements, luigi.Task):
-            requirements = [requirements]
-        if requirements is None:
-            requirements = []
-        task_ids = [r.task_id for r in requirements] + [self.task_id]
-        task_ids_str = "_".join(task_ids)
-        hash_str = hashlib.md5(task_ids_str.encode('utf-8')).hexdigest()
-        short_hash_str = hash_str[:16]  # 64 bit hash
-        return short_hash_str
+        if not hasattr(self, '_task_hash'):
+            requirements = self.requires()
+            # requirements could output dict
+            if isinstance(requirements, dict):
+                # sort tasks by key
+                requirements = [i[1] for i in sorted(requirements.items(), key=lambda e: e[0])]
+            # requirements could output a task
+            if isinstance(requirements, luigi.Task):
+                requirements = [requirements]
+            if requirements is None:
+                requirements = []
+            # todo: find better way to hash task parameters. task_id only contains subset of parameters.
+            task_ids = [r.task_hash if hasattr(r, 'task_hash') else r.task_id for r in requirements] + [str(self.hash_seed) + self.task_id]
+            task_ids_str = "_".join(task_ids)
+            hash_str = hashlib.md5(task_ids_str.encode('utf-8')).hexdigest()
+            task_hash = hash_str[:16]  # 64 bit hash
+            self._task_hash = task_hash
+        return self._task_hash
+
+    def plot_dependency_graph(self, **kwargs):
+        return plot_dependency_graph(self, **kwargs)
 
     @contextmanager
     def metadata_ctx(self) -> Generator[Dict[str, Any], None, None]:
