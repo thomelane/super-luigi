@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 import tempfile
-from typing import Union, Optional
+from typing import Union, Optional, Dict, Any
 from pathlib import Path
 import shutil
 import json
@@ -79,10 +79,12 @@ class LocalFolderTarget(Target):
         self,
         path: Union[str, Path],
         metadata_path: Optional[Union[str, Path]] = None,
-        metadata_inside_folder: bool = False
+        metadata_inside_folder: bool = False,
+        metadata_contents_limit: Optional[int] = 10
     ) -> None:
         self.path = Path(path)
         self.metadata_path = Path(metadata_path or self.default_metadata_path(metadata_inside_folder))
+        self.metadata_contents_limit = metadata_contents_limit
 
     def exists(self) -> bool:
         assert not self.path.is_file(), \
@@ -116,26 +118,29 @@ class LocalFolderTarget(Target):
             return Path(self.path, 'metadata.json')
 
     def write_metadata(self, metadata: dict):
-        contents = []
-        for file in self.path.glob('**/*'):
-            if file.is_file():
+        output: Dict[str, Any] = {
+            'type': self.__class__.__name__,
+            'path': str(self.path)
+        }
+        files = [f for f in self.path.glob('**/*') if f.is_file()]
+        assert len(files) > 0, f"Couldn't find any files at {self.path}."
+        if (self.metadata_contents_limit == None) or (len(files) < self.metadata_contents_limit):
+            contents = []
+            for file in files:
                 content = {
                     'path': str(Path(file).relative_to(self.path)),
                     'md5_hash': file_md5_hash(file)
                 }
                 contents.append(content)
-        metadata['output'] = {
-            'type': self.__class__.__name__,
-            'path': str(self.path),
-            'contents': contents
-        }
+            output['contents'] = contents
+        metadata['output'] = output
         self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.metadata_path, 'w') as f:
+        with open(self.metadata_path, 'w', encoding="utf-8") as f:
             json.dump(metadata, f, indent=4)
 
     def read_metadata(self) -> Optional[dict]:
         try:
-            with open(self.metadata_path, 'r') as f:
+            with open(self.metadata_path, 'r', encoding="utf-8") as f:
                 return json.load(f)
         except FileNotFoundError:
             return None
