@@ -99,7 +99,7 @@ def get_output_path(target, local_output, force_local_download):
 def run_task(
     task: Union[luigi.Task, type],
     config: Optional[dict] = None,
-    config_file: Optional[Path] = None,
+    config_file: Optional[Union[Path, str]] = None,
     central_scheduler: bool = False,
     num_workers: int = 1,
     local_output: bool = False,
@@ -170,7 +170,7 @@ def run_task(
     if config:
         set_config(config)
     elif config_file:
-        set_config_file(config_file)
+        set_config_file(Path(config_file))
     if isinstance(task, type):
         task = task()
 
