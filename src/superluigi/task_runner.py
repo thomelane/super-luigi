@@ -3,10 +3,10 @@ import sys
 from argparse import ArgumentParser
 from importlib import import_module
 import luigi
-from typing import Union, Optional, Type
+from typing import Union, Optional, Type, Dict
 import os
 
-from superluigi.tasks.base import BaseTask, apply_to_target
+from superluigi.tasks.base import BaseTask, ExternalTask, apply_to_target
 
 
 current_dir = Path(__file__).parent
@@ -30,7 +30,7 @@ def parse_task_path(task_path):
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument("--task", required=True)
-    parser.add_argument("--config", required=True)
+    parser.add_argument("--config-file", required=True)
     parser.add_argument("--central-scheduler", action='store_true')
     args = parser.parse_args()
     return args
@@ -51,6 +51,8 @@ def force_upstream_to_fn(
     force_task=None,
     force_task_cls=None
 ):
+    if isinstance(root_task, ExternalTask):
+        return False  # can't force an ExternalTask
     if force_task:
         assert isinstance(force_task, BaseTask)
         is_force_task = root_task is force_task
@@ -67,10 +69,41 @@ def force_upstream_to_fn(
     return force
 
 
+def set_config(config: Dict[str, Dict[str, str]] = {}):
+    for section in config:
+        for option in config[section]:
+            value = config[section][option]
+            assert isinstance(value, str)
+            luigi.configuration.get_config().set(section, option, value)
+
+
+def set_config_file(config_file: Optional[Path] = None):
+    if config_file:
+        assert Path(config_file).exists(), f"{config_file} doesn't exist"
+        luigi.configuration.add_config_path(config_file)
+        print(f'Using config at {config_file}')
+    else:
+        default_config_file = os.getenv('SUPERLUIGI_LOCAL_DATA_DIR', '~/.superluigi/data')
+        if Path(default_config_file).exists():
+            luigi.configuration.add_config_path(default_config_file)
+            print(f'Using config at {default_config_file}')
+
+
+def get_output_path(target, local_output, force_local_download):
+    if local_output:
+        if hasattr(target, 'download'):
+            return target.download(force_local_download=force_local_download)
+    return target.path
+
+
 def run_task(
     task: Union[luigi.Task, type],
-    config: Optional[Path] = None,
-    local_scheduler: bool = True,
+    config: Optional[dict] = None,
+    config_file: Optional[Path] = None,
+    central_scheduler: bool = False,
+    num_workers: int = 1,
+    local_output: bool = False,
+    force_local_download: bool = False,
     force: bool = False,
     force_upstream: bool = False,
     force_upstream_to_task: Optional[BaseTask] = None,
@@ -78,15 +111,24 @@ def run_task(
     raise_exception: bool = False
 ):
     """
-    Will run a task using specified config file.
+    Will run a task using specified config.
 
     Args:
         task (Union[luigi.Task, type]): the Task instance (or a Task class) to be run.
             When a Task class is provided the task will be instanciated using the config.
-            i.e. the task's parameter values will be taken from the config file.
-        config (Path): path to the config file.
-        local_scheduler (bool, optional): Defaults to True.
+            i.e. the task's parameter values will be taken from the config.
+        config (dict): dict containing config.
+        config_file (Path): path to the config file.
+        central_scheduler (bool, optional): Defaults to False.
             See https://luigi.readthedocs.io/en/stable/central_scheduler.html for details.
+        num_workers (int, optional): Defaults to 1.
+            Will use this number of workers when processing tasks.
+            Can set `resources = {'max_workers': 1}` on a task to limit parallel execution.
+        local_output (bool, optional): Defaults to False.
+            Will download the `task` outputs to local file system.
+            Useful for tasks that output to S3 targets.
+        force_local_download (bool, optional): Defaults to False.
+            Will force the `task` outputs to download (even if they are already downloaded and unchanged).
         force (bool, optional): Defaults to False.
             Will force the `task` to run (even when its targets already exist).
         force_upstream (bool, optional): Defaults to False.
@@ -104,20 +146,31 @@ def run_task(
         raise_exception (bool, optional): Defaults to False.
             Will raise the exception rather than capturing it and failing the task.
             Useful for development and debugging.
-"""
-
-    # load config
-    if config:
-        assert Path(config).exists(), f"{config} doesn't exist"
-        luigi.configuration.add_config_path(config)
-        print(f'Using config at {config}')
-    else:
-        default_config = os.getenv('SUPERLUIGI_DEFAULT_TASK_CONFIG', './superluigi.cfg')
-        if Path(default_config).exists():
-            luigi.configuration.add_config_path(default_config)
-            print(f'Using config at {default_config}')
+    """
+    # validate inputs
+    assert not (raise_exception and (num_workers > 1)), \
+        "Can't raise_exception when num_workers > 1."           
+    assert not ((config is not None) and (config_file is not None)), \
+        "Only a single `config` argument should be provided to `run_task`."
+    assert not (raise_exception and (num_workers > 1)), \
+        "Can't raise_exception when num_workers > 1."
+    num_force_args = sum([force, force_upstream, force_upstream_to_task is not None, force_upstream_to_task_cls is not None])
+    assert num_force_args <= 1, \
+        "Only a single `force` argument should be provided to `run_task`."
+    # Since the dependency graph is forked between workers, when the forced
+    # task is complete and `self.force` is set to `False` (see
+    # `run_with_ctx` of `BaseTask`) this only changes the state on the
+    # current worker. Other workers have a copy of the dependency graph
+    # where that task doesn't exist (i.e. where `self.force` is still True,
+    # so it appears as if the task output doesn't exist)
+    assert not ((num_force_args > 0) and (num_workers > 1)), \
+        "Can't force tasks when running with multiple workers."
 
     # create an instance if task is a Task class
+    if config:
+        set_config(config)
+    elif config_file:
+        set_config_file(config_file)
     if isinstance(task, type):
         task = task()
 
@@ -135,88 +188,23 @@ def run_task(
 
     status = luigi.build(
         tasks=[task],
-        local_scheduler=local_scheduler
+        local_scheduler=not central_scheduler,
+        workers=num_workers,
     )
 
     if status:
         output_path = apply_to_target(
             target=task.output(),
-            fn=lambda e: e.path
+            fn=lambda e: get_output_path(e, local_output, force_local_download)
         )
         print(f'Ouputs can be found at {output_path}')
-
-
-def run_task_and_download_output(
-    task: Union[luigi.Task, type],
-    config: Path = os.getenv('SUPERLUIGI_DEFAULT_TASK_CONFIG', './superluigi.cfg'),
-    local_scheduler: bool = True,
-    force: bool = False,
-    force_upstream: bool = False,
-    force_upstream_to_task: Optional[BaseTask] = None,
-    force_upstream_to_task_cls: Optional[Type] = None,
-    raise_exception: bool = False
-) -> Union[Path, list, dict]:
-    """
-    Convienience function for running a task and downloading the output.
-    Useful for tasks that output to S3 targets.
-
-    Args:
-        task (Union[luigi.Task, type]): the Task instance (or a Task class) to be run.
-            When a Task class is provided the task will be instanciated using the config.
-            i.e. the task's parameter values will be taken from the config file.
-        config (Path): path to the config file.
-        local_scheduler (bool, optional): Defaults to True.
-            See https://luigi.readthedocs.io/en/stable/central_scheduler.html for details.
-        force (bool, optional): Defaults to False.
-            Will force the `task` to run (even when its targets already exist).
-        force_upstream (bool, optional): Defaults to False.
-            Will force the `task` to run and all of its upstream requirements
-            too (even when their targets already exist).
-        force_upstream_to_task (Optional[BaseTask], optional): Defaults to None.
-            Will look upstream from `task` for `force_upstream_to_task` and, if
-            found, will force `force_upstream_to_task`, `task` and their
-            intermediate tasks to run (even when their targets already exist).
-        force_upstream_to_task_cls (Optional[Type], optional): Defaults to None.
-            Will look upstream from `task` for tasks of type
-            `force_upstream_to_task_cls` and, if found, will force those
-            `force_upstream_to_task_cls` tasks, the `task` and all their
-            intermediate tasks to run (even when their targets already exist).
-        raise_exception (bool, optional): Defaults to False.
-            Will raise the exception rather than capturing it and failing the task.
-            Useful for development and debugging.
-
-    Returns:
-        Path: local path of the output after being downloaded.
-            Could be a Path, or a more complex structure (e.g. list or dict) depending on
-            the return in the task's `output` method.
-    """
-    def validate_output(target):
-        assert hasattr(target, 'download'), \
-            "Output target doesn't have a `download` method. Use `run_task` instead."
-
-    output_path = apply_to_target(
-        target=task.output(),
-        fn=validate_output
-    )
-    run_task(
-        task=task,
-        config=config,
-        local_scheduler=local_scheduler,
-        force=force,
-        force_upstream=force_upstream,
-        force_upstream_to_task=force_upstream_to_task,
-        force_upstream_to_task_cls=force_upstream_to_task_cls,
-        raise_exception=raise_exception
-    )
-    output_path = apply_to_target(
-        target=task.output(),
-        fn=lambda e: e.download()
-    )
-    return output_path
+        return output_path
+    else:
+        raise Exception('`luigi.build` failed. Check above the summary for error logs.')
 
 
 if __name__ == "__main__":
     args = parse_args()
     module_path, task_name = parse_task_path(args.task)
     task_cls = get_task_cls(module_path, task_name)
-    run_task(task_cls, args.config, not args.central_scheduler)
+    run_task(task_cls, args.config_file, args.central_scheduler)
